@@ -828,7 +828,7 @@ def prepare_push_task_functional(
     manager: None | ParentRunManager | AsyncParentRunManager = None,
     cache_policy: CachePolicy | None = None,
     retry_policy: Sequence[RetryPolicy] = (),
-compute_cache_key: bool = True,
+    compute_cache_key: bool = True,
     parent_ns: str,
     # namespace: bytes, *parts: str | bytes
     task_id_func: _TaskIDFn,
@@ -968,7 +968,7 @@ def prepare_push_task_send(
     manager: None | ParentRunManager | AsyncParentRunManager = None,
     cache_policy: CachePolicy | None = None,
     retry_policy: Sequence[RetryPolicy] = (),
-compute_cache_key: bool = True,
+    compute_cache_key: bool = True,
     parent_ns: str,
     task_id_func: _TaskIDFn,
     processes: Mapping[str, PregelNode],
