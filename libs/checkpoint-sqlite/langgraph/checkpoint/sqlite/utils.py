@@ -29,6 +29,45 @@ def _validate_filter_key(key: str) -> None:
         )
 
 
+def _is_out_of_range_int(value: Any) -> bool:
+    """Return whether an integer cannot be bound by SQLite's signed 64-bit INTEGER type."""
+    return (
+        isinstance(value, int)
+        and not isinstance(value, bool)
+        and not -(2**63) <= value <= 2**63 - 1
+    )
+
+
+def _has_out_of_range_int_filter(metadata_filter: dict[str, Any] | None) -> bool:
+    """Whether metadata filtering needs an exact Python-side integer comparison."""
+    return bool(metadata_filter) and any(
+        _is_out_of_range_int(value) for value in metadata_filter.values()
+    )
+
+
+def _matches_out_of_range_int_filter(
+    metadata: dict[str, Any], metadata_filter: dict[str, Any] | None
+) -> bool:
+    """Match oversized integer metadata values without SQLite numeric coercion."""
+    if not metadata_filter:
+        return True
+
+    for key, query_value in metadata_filter.items():
+        if not _is_out_of_range_int(query_value):
+            continue
+
+        value: Any = metadata
+        for segment in key.split("."):
+            if not isinstance(value, dict) or segment not in value:
+                return False
+            value = value[segment]
+
+        if value != query_value:
+            return False
+
+    return True
+
+
 def _metadata_predicate(
     metadata_filter: dict[str, Any],
 ) -> tuple[Sequence[str], Sequence[Any]]:
@@ -65,6 +104,11 @@ def _metadata_predicate(
     # process metadata query
     for query_key, query_value in metadata_filter.items():
         _validate_filter_key(query_key)
+        if _is_out_of_range_int(query_value):
+            # sqlite3 can only bind signed 64-bit integers. Filter these exact
+            # values after reading the JSON metadata so adjacent large IDs do
+            # not overflow or collapse through floating-point conversion.
+            continue
         operator, param_value = _where_value(query_value)
         predicates.append(
             f"json_extract(CAST(metadata AS TEXT), '$.{query_key}') {operator}"
