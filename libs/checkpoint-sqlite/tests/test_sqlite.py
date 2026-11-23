@@ -128,6 +128,22 @@ class TestSqliteSaver:
             assert len(search_results_7) == 1
             assert search_results_7[0].config["configurable"]["thread_id"] == "thread-2"
 
+    def test_search_matches_unsigned_64_bit_metadata_ids(self) -> None:
+        values = (2**63 - 1, 2**63, 2**63 + 1)
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "unsigned-id-filter", "checkpoint_ns": ""}
+        }
+        with SqliteSaver.from_conn_string(":memory:") as saver:
+            for value in values:
+                saver.put(config, empty_checkpoint(), {"record_id": value}, {})
+
+            for value in values:
+                results = list(
+                    saver.list(config, filter={"record_id": value}, limit=1)
+                )
+                assert len(results) == 1
+                assert results[0].metadata["record_id"] == value
+
     def test_search_where(self) -> None:
         # call method / assertions
         expected_predicate_1 = "WHERE json_extract(CAST(metadata AS TEXT), '$.source') = ? AND json_extract(CAST(metadata AS TEXT), '$.step') = ? AND json_extract(CAST(metadata AS TEXT), '$.writes') = ? AND json_extract(CAST(metadata AS TEXT), '$.score') = ? AND checkpoint_id < ?"
