@@ -130,6 +130,25 @@ class TestAsyncSqliteSaver:
             assert len(search_results_7) == 1
             assert search_results_7[0].config["configurable"]["thread_id"] == "thread-1"
 
+    async def test_search_matches_unsigned_64_bit_metadata_ids(self) -> None:
+        values = (2**63 - 1, 2**63, 2**63 + 1)
+        config: RunnableConfig = {
+            "configurable": {"thread_id": "unsigned-id-filter", "checkpoint_ns": ""}
+        }
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+            for value in values:
+                await saver.aput(config, empty_checkpoint(), {"record_id": value}, {})
+
+            for value in values:
+                results = [
+                    item
+                    async for item in saver.alist(
+                        config, filter={"record_id": value}, limit=1
+                    )
+                ]
+                assert len(results) == 1
+                assert results[0].metadata["record_id"] == value
+
     async def test_limit_parameter_sql_injection_prevention(self) -> None:
         """Test that the limit parameter properly uses parameterized queries to prevent SQL injection."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
