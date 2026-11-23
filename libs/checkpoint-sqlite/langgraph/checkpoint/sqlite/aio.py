@@ -38,6 +38,8 @@ from langgraph.checkpoint.sqlite._delta import (
     step_walk_with_row,
 )
 from langgraph.checkpoint.sqlite.utils import (
+    _has_out_of_range_int_filter,
+    _matches_out_of_range_int_filter,
     load_pending_writes,
     pending_writes_sql,
     search_where,
@@ -476,13 +478,17 @@ class AsyncSqliteSaver(BaseCheckpointSaver[str]):
         """
         await self.setup()
         where, params = search_where(config, filter, before)
+        needs_python_filter = _has_out_of_range_int_filter(filter)
+        if limit == 0 and needs_python_filter:
+            return
         query = f"""SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id, type, checkpoint, metadata
         FROM checkpoints
         {where}
         ORDER BY checkpoint_id DESC"""
-        if limit is not None:
+        if limit is not None and not needs_python_filter:
             query += " LIMIT ?"
             params = (*params, limit)
+        matched_count = 0
         async with (
             self.lock,
             self.conn.execute(query, params) as cur,
@@ -497,6 +503,9 @@ class AsyncSqliteSaver(BaseCheckpointSaver[str]):
                 checkpoint,
                 metadata,
             ) in cur:
+                metadata_dict = json.loads(metadata) if metadata is not None else {}
+                if not _matches_out_of_range_int_filter(metadata_dict, filter):
+                    continue
                 await wcur.execute(
                     pending_writes_sql(self._has_task_path),
                     (thread_id, checkpoint_ns, checkpoint_id),
@@ -510,10 +519,7 @@ class AsyncSqliteSaver(BaseCheckpointSaver[str]):
                         }
                     },
                     self.serde.loads_typed((type, checkpoint)),
-                    cast(
-                        CheckpointMetadata,
-                        (json.loads(metadata) if metadata is not None else {}),
-                    ),
+                    cast(CheckpointMetadata, metadata_dict),
                     (
                         {
                             "configurable": {
@@ -527,6 +533,9 @@ class AsyncSqliteSaver(BaseCheckpointSaver[str]):
                     ),
                     load_pending_writes(await wcur.fetchall(), self.serde),
                 )
+                matched_count += 1
+                if limit is not None and limit >= 0 and matched_count >= limit:
+                    break
 
     async def aput(
         self,
